@@ -1,0 +1,191 @@
+---
+title: "hw2"
+author: "Jiahui Yang"
+date: '2024-03-11'
+output: html_document
+---
+
+```
+{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+```
+
+
+```{r}
+install.packages("sf") 
+install.packages("sp") 
+library(ggplot2)
+library(dplyr) 
+library(readr) 
+library(sf) 
+install.packages("map")
+library(maps) 
+library(sp)
+
+# Load the data
+
+storm_data <- read.csv("C:/Users/Admin/Desktop/storms.csv") 
+
+# Aggregate the data by state
+state_damage <- storm_data %>%
+  group_by(STATE) %>%
+  summarise(Total_Damage = sum(DAMAGE_PROPERTY_USD + DAMAGE_CROPS_USD, na.rm = TRUE))
+state_damage$STATE <- tolower(state_damage$STATE)
+states_map <- map_data("state") 
+states_map <- states_map %>%
+left_join(state_damage, by = c("region" = "STATE"))
+print(summary(states_map$Total_Damage))
+
+ggplot() +
+  geom_polygon(data = states_map, aes(x = long, y = lat, group = group, fill = Total_Damage), color = "white") +
+  scale_fill_gradient(low = "lightblue", high = "red", na.value = "grey50", name = "Total Damage (USD)") +
+  labs(title = "Total Storm Damage by State in the US") +
+  theme_minimal() +
+  theme(legend.position = "right",
+        plot.title = element_text(size = 20, face = "bold"),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        panel.background = element_blank())
+
+```
+```{r}
+library(scales) 
+county_damage <- storm_data %>%
+  group_by(CZ_NAME, STATE) %>%
+  summarise(Total_Damage = sum(DAMAGE_PROPERTY_USD + DAMAGE_CROPS_USD, na.rm = TRUE)) %>%
+  ungroup() 
+counties_map <- map_data("county")
+
+county_damage$CZ_NAME <- tolower(county_damage$CZ_NAME)
+county_damage$STATE <- tolower(county_damage$STATE)
+
+# Here, you would need to ensure that the county and state identifiers match those used in the map data.
+counties_map <- left_join(counties_map, county_damage, by = c("subregion" = "CZ_NAME", "region" = "STATE"))
+
+
+ggplot(data = counties_map) +
+  geom_polygon(aes(x = long, y = lat, group = group, fill = Total_Damage), color = "white") +
+  scale_fill_gradientn(colors = c("lightblue", "green","yellow","red"),
+                       values = rescale(c(0, 1e3, 1e5, 1e7, 1e9)),
+                       na.value = "grey50",
+                       name = "Total Damage (USD)") +
+  labs(title = "Total Storm Damage by County in the US") +
+  theme_minimal() +
+  theme(legend.position = "right",
+        plot.title = element_text(size = 20, face = "bold"),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        panel.background = element_blank())
+```
+```{r}
+states_map <- map_data("state")
+damage2 <- storm_data %>%
+  group_by(STATE) %>%
+  summarise(Total_Casualties = sum(INJURIES_DIRECT + INJURIES_INDIRECT + DEATHS_DIRECT + DEATHS_INDIRECT), na.rm = TRUE)
+damage2$STATE <- tolower(damage2$STATE)
+
+states_map <- states_map %>%
+left_join(damage2, by = c("region" = "STATE"))
+
+# Plotting the density map
+ggplot() +
+  geom_polygon(data = states_map, aes(x = long, y = lat, group = group, fill = Total_Casualties), color = "white") +
+  scale_fill_gradient(low = "lightblue", high = "red", na.value = "grey50", name = "Total Damage (USD)") +
+  labs(title = "Total Storm Damage by State in the US") +
+  theme_minimal() +
+  theme(legend.position = "right",
+        plot.title = element_text(size = 20, face = "bold"),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        panel.background = element_blank())
+```
+```{r}
+library(dplyr)
+library(leaflet)
+library(maps)
+
+state_deaths <- storm_data %>%
+  group_by(STATE) %>%
+  summarise(Total_Deaths = sum(DEATHS_DIRECT + DEATHS_INDIRECT, na.rm = TRUE)) %>%
+  filter(Total_Deaths > 0) %>%
+  ungroup()
+
+states_map <- map_data("state") %>%
+  mutate(region = toupper(region)) 
+
+state_centers <- aggregate(cbind(long = states_map$long, lat = states_map$lat), 
+                           by = list(STATE = states_map$region), 
+                           FUN = function(x) mean(range(x)))
+
+state_info <- merge(state_deaths, state_centers, by = "STATE")
+
+leaflet(state_info) %>%
+  addTiles() %>%
+  addMarkers(~long, ~lat, popup = ~paste(STATE, "<br>", "Total Deaths: ", Total_Deaths)) %>%
+  addProviderTiles(providers$Esri.NatGeoWorldMap)
+
+
+```
+
+```{r}
+colordata<- storm_data %>%
+  mutate(Total_Deaths = DEATHS_DIRECT + DEATHS_INDIRECT) %>%
+  filter(Total_Deaths > 0) %>%
+  select(BEGIN_LAT, BEGIN_LON, Total_Deaths,EVENT_TYPE)
+table(colordata$EVENT_TYPE)
+
+colordata <- colordata %>%
+  mutate(EVENT_TYPE2 = case_when(
+    EVENT_TYPE %in% c("Heat", "Cold/Wind Chill", "Excessive Heat", "Extreme Cold/Wind Chill", "Frost/Freeze","Blizzard", "Heavy Snow", "Ice Storm", "Lake-Effect Snow", "Winter Storm", "Winter Weather", "Sleet", "Freezing Fog") ~ "Extreme Temperature",
+    EVENT_TYPE %in% c("Flash Flood", "Flood", "Coastal Flood", "Lakeshore Flood", "Storm Surge/Tide") ~ "Flood",
+    EVENT_TYPE %in% c("High Wind", "Hurricane", "Tropical Storm", "Marine Strong Wind", "Strong Wind", "Thunderstorm Wind", "Tornado") ~ "Wind",
+    TRUE ~ "Other"))
+
+colors <- c("Extreme Temperature" = "blue", 
+            "Flood" = "lightblue", 
+            "Wind" = "yellow", 
+            "Other" = "grey")
+colordata$Color <- sapply(colordata$EVENT_TYPE2, function(type) colors[type])
+
+# Plot the map with the color fill
+leaflet(colordata) %>%
+  addTiles() %>%
+  addCircleMarkers(lng = ~BEGIN_LON, lat = ~BEGIN_LAT,
+    color = ~Color,  # Use the color column
+    popup = ~paste(
+      "<br>Event Type: ", EVENT_TYPE,
+      "<br>Total Deaths: ", Total_Deaths),
+    radius = 6, fillOpacity = 0.8) %>%
+  setView(lng = -98.5795, lat = 39.8283, zoom = 4) %>%
+  addLegend(position = "bottomright", colors = colors, labels = names(colors), title = "Event Type")
+```
+```{r}
+leaflet(colordata) %>%
+  addTiles() %>%
+  addCircleMarkers(lng = ~BEGIN_LON, lat = ~BEGIN_LAT,
+    color = ~Color,  # Use the color column for marker color
+    popup = ~paste(
+      "<br>Event Type: ", EVENT_TYPE,
+      "<br>Total Deaths: ", Total_Deaths),
+    radius = 6, fillOpacity = 0.8,
+    clusterOptions = markerClusterOptions()) %>%  # Enable clustering
+  setView(lng = -98.5795, lat = 39.8283, zoom = 4) %>%
+  addLegend(position = "bottomright", 
+            colors = colors, 
+            labels = names(colors), 
+            title = "Event Type")
+```
+
+
+
